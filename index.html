@@ -45,6 +45,34 @@ window.__GH = (function(){
   };
 })();
 </script>
+<script>
+/* Visit counter — records one anonymous hit per browser session (never for bots or the
+   signed-in admin). Stores only a random id + the time; see analytics_setup.sql. */
+(function(){
+  try {
+    var ls = window.localStorage, ss = window.sessionStorage, gh = window.__GH;
+    if (!gh || !gh.url || !gh.key) return;
+    if (navigator.webdriver || /bot|crawl|spider|slurp|headless|lighthouse|preview|facebookexternalhit/i.test(navigator.userAgent)) return;
+    if (ls.getItem('ghungroo_admin_unlocked') === '1') return;
+    if (ss.getItem('gh_visit')) return;
+    var id = ls.getItem('gh_vid');
+    if (!id){
+      id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+      ls.setItem('gh_vid', id);
+    }
+    ss.setItem('gh_visit', '1');
+    var send = function(){
+      fetch(gh.url + '/rest/v1/rpc/record_visit', {
+        method: 'POST', keepalive: true, credentials: 'omit',
+        headers: { apikey: gh.key, Authorization: 'Bearer ' + gh.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_visitor: id, p_path: (location.hash || '#/').slice(1) })
+      }).catch(function(){});
+    };
+    if (document.readyState === 'complete') setTimeout(send, 1500);
+    else window.addEventListener('load', function(){ setTimeout(send, 1500); });
+  } catch (e) { /* storage blocked — just don't count */ }
+})();
+</script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"JewelryStore","name":"Ghungroo Creations","description":"Anti-tarnish jewellery store offering necklaces, earrings, bangles, rings, chains and bridal jewellery, made to feel like real gold.","address":{"@type":"PostalAddress","addressLocality":"Hanamkonda","addressRegion":"Telangana","addressCountry":"IN"}}
 </script>
@@ -1748,9 +1776,9 @@ const PRODUCT_DETAILS = p => ([
 const CONTENT = {
   announcement: 'Now showing the festive edit in store — **enquire on WhatsApp** for availability',
 
-  /* the auto-sliding banner shown above the hero. Up to 5 slots — the first
-     3 ship with a photo and caption, the last 2 stay empty (and hidden)
-     until an admin uploads an image into them from Site Admin → Homepage. */
+  /* the auto-sliding banner shown above the hero. The first 3 ship with a
+     photo and caption; more can be added (and any removed) from
+     Site Admin → Homepage, and a slide stays hidden until it has a photo. */
   promoSlides: [
     { key:'slide1', photo:'hoops',       kicker:'New in',        title:'Fresh drops in earrings and everyday anti-tarnish gold.', href:'#/catalogue?cat=earrings', alt:'Gold hoop earrings by Ghungroo Creations' },
     { key:'slide2', photo:'gemEarrings', kicker:'Gemstone edit', title:'Colour, without losing the gold.',           href:'#/catalogue',              alt:'Gold earrings set with coloured gemstones' },
@@ -1994,7 +2022,7 @@ function toast(msg){
    add/delete products, collections, categories, reels, offers bar) now
    lives in the separate ghungroo-admin.html file.
    ========================================================================== */
-let ADMIN = { photos:{}, products:{}, logo:null, links:{}, titles:{}, reelsAdded:[], reelsRemoved:[], collectionsAdded:[], collectionsRemoved:[], categoriesAdded:[], categoriesRemoved:[], announce:null };
+let ADMIN = { photos:{}, products:{}, logo:null, links:{}, titles:{}, reelsAdded:[], reelsRemoved:[], collectionsAdded:[], collectionsRemoved:[], categoriesAdded:[], categoriesRemoved:[], slidesAdded:[], slidesRemoved:[], announce:null };
 
 /* ---------- offers bar (scrolling announcement strip) ----------
    Messages come from the admin panel (Site Admin → Offers Bar), stored as one
@@ -2028,7 +2056,7 @@ function applyAnnouncement(){
   track.style.setProperty('--announce-dur', Math.max(14, group.offsetWidth / 55) + 's');
 }
 function unflattenOverrides(rows){
-  const out = { photos:{}, products:{}, logo:null, links:{}, titles:{}, reelsAdded:[], reelsRemoved:[], collectionsAdded:[], collectionsRemoved:[], categoriesAdded:[], categoriesRemoved:[], announce:null };
+  const out = { photos:{}, products:{}, logo:null, links:{}, titles:{}, reelsAdded:[], reelsRemoved:[], collectionsAdded:[], collectionsRemoved:[], categoriesAdded:[], categoriesRemoved:[], slidesAdded:[], slidesRemoved:[], announce:null };
   rows.forEach(({ key, url }) => {
     if (key === 'logo'){ out.logo = url; return; }
     if (key === 'announce:config'){ try{ out.announce = JSON.parse(url) || null; }catch(e){ out.announce = null; } return; }
@@ -2038,6 +2066,8 @@ function unflattenOverrides(rows){
     if (key === 'collections:removed'){ try{ out.collectionsRemoved = JSON.parse(url) || []; }catch(e){ out.collectionsRemoved = []; } return; }
     if (key === 'categories:added'){ try{ out.categoriesAdded = JSON.parse(url) || []; }catch(e){ out.categoriesAdded = []; } return; }
     if (key === 'categories:removed'){ try{ out.categoriesRemoved = JSON.parse(url) || []; }catch(e){ out.categoriesRemoved = []; } return; }
+    if (key === 'slides:added'){ try{ out.slidesAdded = JSON.parse(url) || []; }catch(e){ out.slidesAdded = []; } return; }
+    if (key === 'slides:removed'){ try{ out.slidesRemoved = JSON.parse(url) || []; }catch(e){ out.slidesRemoved = []; } return; }
     if (key.startsWith('photo:')){ out.photos[key.slice(6)] = url; return; }
     if (key.startsWith('link:')){ out.links[key.slice(5)] = url; return; }
     if (key.startsWith('title:')){ out.titles[key.slice(6)] = url; return; }
@@ -2175,9 +2205,23 @@ function promoSlideSrc(slide, w = 1600){
   if (slide.photo) return img(slide.photo, w);
   return null;
 }
+/* every slide in the banner, in playing order: the built-in slides that
+   haven't been removed (an empty built-in placeholder only counts once it
+   has a photo), then the ones added from Site Admin → Homepage. */
+function allPromoSlides(){
+  const removed = new Set(ADMIN.slidesRemoved || []);
+  const base = CONTENT.promoSlides.filter(s => !removed.has(s.key) && (s.photo || ADMIN.photos[s.key]));
+  const added = (ADMIN.slidesAdded || []).filter(s => !removed.has(s.key));
+  return [...base, ...added];
+}
+function findPromoSlide(key){
+  return CONTENT.promoSlides.find(s => s.key === key) || (ADMIN.slidesAdded || []).find(s => s.key === key) || null;
+}
+/* a slide link may only point at a page on this site or a web address */
+const safeSlideHref = h => /^(#\/|https?:\/\/)/i.test(h || '') ? h : '#/catalogue';
 function promoSlidesData(){
-  return CONTENT.promoSlides
-    .map(s => ({ ...s, src: promoSlideSrc(s) }))
+  return allPromoSlides()
+    .map(s => ({ ...s, href: safeSlideHref(s.href), src: promoSlideSrc(s) }))
     .filter(s => s.src);
 }
 /* ==========================================================================
@@ -2420,7 +2464,7 @@ function pageHome(){
     <div class="promo-stage">
       <div class="promo-track">
         ${slides.map((s, i) => `
-        <a class="promo-slide${i === 0 ? ' is-active' : ''}" id="promo-slide-${i}" href="${s.href || '#/catalogue'}" data-idx="${i}">
+        <a class="promo-slide${i === 0 ? ' is-active' : ''}" id="promo-slide-${i}" href="${esc(s.href || '#/catalogue')}" data-idx="${i}">
           <img ${promoImgAttrs(s.src, i, slides.length)} alt="${esc(s.alt || s.title || 'Ghungroo Creations')}" loading="${i === 0 ? 'eager' : 'lazy'}" fetchpriority="${i === 0 ? 'high' : 'auto'}" decoding="async">
           ${s.kicker || s.title ? `<span class="promo-cap">
             ${s.kicker ? `<span class="kicker">${esc(s.kicker)}</span>` : ''}
