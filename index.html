@@ -1573,6 +1573,7 @@ const PHOTOS = {
   modelPink:        'photo-1617627143750-d86bc21e42bb',
   bride:            'photo-1600685890506-593fdf55949b',
   modelSari:        'photo-1727430228383-aa1fb59db8bf',
+  storeVisit:       'photo-1727430228383-aa1fb59db8bf',   /* “Visit us” section — own key so changing it never touches the Instagram reel */
   modelRedGold:     'photo-1617633150878-7df1d12a9a57',
   bridalSari:       'photo-1570212773364-e30cd076539e',
   modelGoldRed:     'photo-1594140700783-f9e70c7abc25',
@@ -1876,6 +1877,12 @@ const CONTENT = {
     enquiries:'WhatsApp & in store',
     photo:'modelPink',
     alt:'Woman in a pink and orange saree wearing gold jewellery'
+  },
+
+  /* “Visit us” block (home page) — photo is editable in the admin: Editorial Images → Visit us */
+  store: {
+    photo:'storeVisit',
+    alt:'Customer wearing a gold necklace and earrings from Ghungroo Creations'
   },
 
   /* default wording for the three spec rows on every product page — each product can override them */
@@ -2497,7 +2504,7 @@ function storeSection(){
           <a class="btn btn-line" href="${telLink()}">Call store</a>
         </div>
       </div>
-      <div data-reveal style="--d:90ms">${picture('modelSari', 'Customer wearing a gold necklace and earrings from Ghungroo Creations', 'r-3-4', 900)}</div>
+      <div data-reveal style="--d:90ms">${picture((CONTENT.store || {}).photo || 'storeVisit', (CONTENT.store || {}).alt || 'Customer wearing a gold necklace and earrings from Ghungroo Creations', 'r-3-4', 900)}</div>
     </div>
   </section>`;
 }
